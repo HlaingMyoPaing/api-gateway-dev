@@ -1,0 +1,73 @@
+version: "3.9"
+
+networks:
+  kong-net:
+    external: true
+    name: kong-net
+
+volumes:
+  grafana-db-data:
+  grafana-data:
+
+services:
+  # --- Postgres for Grafana ---
+  grafana-db:
+    image: postgres:15
+    container_name: grafana-db
+    environment:
+      POSTGRES_DB: ${GF_DB_NAME}
+      POSTGRES_USER: ${GF_DB_USER}
+      POSTGRES_PASSWORD: ${GF_DB_PASSWORD}
+    volumes:
+      - grafana-db-data:/var/lib/postgresql/data
+    healthcheck:
+       test: [ "CMD-SHELL", "pg_isready -U ${GF_DB_USER} -d ${GF_DB_NAME}" ]
+       interval: 10s
+       timeout: 5s
+       retries: 10
+    networks:
+      - kong-net
+
+  # --- Grafana OSS (uses Postgres DB & OIDC) ---
+  grafana:
+    image: grafana/grafana-oss:11.1.0
+    depends_on:
+      grafana-db:
+        condition: service_healthy
+    container_name: grafana
+    environment:
+      # DB config
+      GF_DATABASE_TYPE: postgres
+      GF_DATABASE_HOST: ${GF_DB_HOST}:${GF_DB_PORT}
+      GF_DATABASE_NAME: ${GF_DB_NAME}
+      GF_DATABASE_USER: ${GF_DB_USER}
+      GF_DATABASE_PASSWORD: ${GF_DB_PASSWORD}
+      # Admin
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "true"
+      GF_SERVER_DOMAIN: host.docker.internal
+
+      GF_AUTH_GENERIC_OAUTH_ENABLED: "true"
+      GF_AUTH_GENERIC_OAUTH_NAME: "Keycloak"
+      GF_AUTH_GENERIC_OAUTH_CLIENT_ID: grafana-oidc
+      # DO NOT SET CLIENT SECRET for public clients → remove the next line if you had it
+      # GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET: (remove)
+      GF_AUTH_GENERIC_OAUTH_USE_PKCE: "true"
+      GF_AUTH_GENERIC_OAUTH_SCOPES: "openid profile email"
+      GF_AUTH_GENERIC_OAUTH_AUTH_URL: "http://host.docker.internal:8080/auth/realms/demo/protocol/openid-connect/auth"
+      GF_AUTH_GENERIC_OAUTH_TOKEN_URL: "http://keycloak:8080/auth/realms/demo/protocol/openid-connect/token"
+      GF_AUTH_GENERIC_OAUTH_API_URL: "http://keycloak:8080/auth/realms/demo/protocol/openid-connect/userinfo"
+      GF_AUTH_SIGNOUT_REDIRECT_URL: "http://host.docker.internal:8080/auth/realms/demo/protocol/openid-connect/logout?post_logout_redirect_uri=http://host.docker.internal:3000/"
+      GF_SERVER_ROOT_URL: "http://host.docker.internal:3000/"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - kong-net
+    ports:
+      - "${GRAFANA_HTTP_PORT}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health | grep -q '\"database\": \"ok\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10

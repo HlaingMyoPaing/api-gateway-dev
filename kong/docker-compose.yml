@@ -1,0 +1,146 @@
+version: "3.9"
+
+networks:
+  kong-net:
+    external: true
+
+services:
+  kong-database:
+    image: postgres:16-alpine
+    container_name: kong-database
+    environment:
+      POSTGRES_USER: ${KONG_PG_USER:-kong}
+      POSTGRES_PASSWORD: ${KONG_PG_PASSWORD:-kong}
+      POSTGRES_DB: ${KONG_PG_DATABASE:-kong}
+    volumes:
+      - kong-database-data:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"   # expose for pgAdmin/DBeaver on host
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${KONG_PG_USER:-kong} -d ${KONG_PG_DATABASE:-kong}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - kong-net
+
+  kong-migrations:
+    build:
+      context: ./kong
+    container_name: kong-migrations
+    depends_on:
+      kong-database:
+        condition: service_healthy
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-database
+      KONG_PG_USER: ${KONG_PG_USER:-kong}
+      KONG_PG_PASSWORD: ${KONG_PG_PASSWORD:-kong}
+      KONG_PG_DATABASE: ${KONG_PG_DATABASE:-kong}
+    command: >
+      sh -c "kong migrations bootstrap &&
+             kong migrations up &&
+             kong migrations finish"
+    restart: "no"
+    networks:
+      - kong-net
+
+  kong:
+    build:
+      context: ./kong
+    container_name: kong
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      kong-migrations:
+        condition: service_completed_successfully
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-database
+      KONG_PG_USER: ${KONG_PG_USER:-kong}
+      KONG_PG_PASSWORD: ${KONG_PG_PASSWORD:-kong}
+      KONG_PG_DATABASE: ${KONG_PG_DATABASE:-kong}
+      # HTTPS
+      # KONG_ADMIN_SSL_CERT: /certs/admin.crt
+      # KONG_ADMIN_SSL_CERT_KEY: /certs/admin.key
+      KONG_ADMIN_API_URL: ${KONG_ADMIN_API_URL:-http://host.docker.internal:3001/admin-api/}
+      # Node identity
+      KONG_HOSTNAME: ${KONG_HOSTNAME:-host.docker.internal}
+      # Proxy listeners
+      KONG_PROXY_LISTEN: 0.0.0.0:${KONG_PROXY_HTTP} #, 0.0.0.0:${KONG_PROXY_HTTPS} ssl
+      # Admin API
+      KONG_ADMIN_LISTEN: 0.0.0.0:${KONG_ADMIN_HTTP} #, 0.0.0.0:${KONG_ADMIN_HTTPS} ssl
+      KONG_ADMIN_GUI_PATH: ${KONG_ADMIN_GUI_PATH}
+      KONG_ADMIN_GUI_URL: ${KONG_ADMIN_GUI_URL}
+      # Status/metrics
+      KONG_STATUS_LISTEN: 0.0.0.0:8100
+      # Plugins
+      KONG_PLUGINS: bundled,prometheus,kong-keycloak-oidc
+      KONG_LOG_LEVEL: notice
+      KONG_DECLARATIVE_CONFIG:   # empty; we're using Admin API via bootstrap
+    ports:
+      - "8002:8002"
+      - "${KONG_PROXY_HTTP}:${KONG_PROXY_HTTP}"
+      #- "${KONG_PROXY_HTTPS}:${KONG_PROXY_HTTPS}"
+      - "${KONG_ADMIN_HTTP}:${KONG_ADMIN_HTTP}"
+      #- "${KONG_ADMIN_HTTPS}:${KONG_ADMIN_HTTPS}"
+    #volumes:
+    #  - './certs/admin.crt:/certs/admin.crt:ro'
+    #  - './certs/admin.key:/certs/admin.key:ro'
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2g
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks:
+      - kong-net
+
+  kong-setup:
+    image: curlimages/curl:8.8.0
+    container_name: kong-setup
+    depends_on:
+      kong:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "until curl -s http://kong:8001/status >/dev/null; do echo 'waiting for kong...'; sleep 2; done &&
+       echo '==> enabling prometheus (global)' &&
+       (curl -s -o /dev/null -w '%{http_code}' -X POST http://kong:8001/plugins --data name=prometheus | grep -E '20[01]') || true &&
+       echo 'setup done'"
+    networks:
+      - kong-net
+    restart: "no"
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: prometheus
+    depends_on:
+      - kong
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - kong-net
+
+  # One-shot bootstrap that wires Kong + OIDC automatically
+  bootstrap:
+    image: curlimages/curl:8.8.0
+    container_name: bootstrap
+    depends_on:
+      kong:
+        condition: service_healthy
+    env_file: .env
+    volumes:
+      - ./scripts:/workspace/scripts:ro
+    entrypoint: ["/bin/sh","-c","/workspace/scripts/bootstrap.sh"]
+    networks:
+      - kong-net
+
+volumes:
+  kong-database-data:

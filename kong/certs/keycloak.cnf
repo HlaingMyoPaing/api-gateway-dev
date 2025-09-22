@@ -1,0 +1,20 @@
+[ req ]
+default_bits = 2048
+distinguished_name = req_distinguished_name
+x509_extensions = v3_req
+prompt = no
+
+[ req_distinguished_name ]
+C = JP
+ST = Tokyo
+L = Setagaya
+O = Dev
+OU = Demo
+CN = host.docker.internal
+
+[ v3_req ]
+subjectAltName = @alt_names
+
+[ alt_names ]
+DNS.1 = host.docker.internal
+DNS.2 = localhost

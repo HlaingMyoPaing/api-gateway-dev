@@ -1,0 +1,19 @@
+version: '3.8'
+
+include:
+  - ./docker-compose.yml
+
+services:
+  dev-proxy:
+    image: nginx:stable-alpine-perl
+    container_name: dev-proxy
+    ports:
+      - "3001:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/nginx.bk.conf:/etc/nginx/nginx.bk.conf:ro
+     # - ./nginx/kconfig.js:/etc/nginx/static/admin/kconfig.js:ro
+    depends_on:
+      - kong
+    networks:
+      - kong-net
