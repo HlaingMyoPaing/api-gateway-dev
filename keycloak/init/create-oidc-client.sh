@@ -86,7 +86,7 @@ KONG_CLIENT_JSON=$(cat <<'JSON'
 "http://host.docker.internal:3000/*",
 "http://host.docker.internal:8000/*",
 "http://host.docker.internal:8083/*",
-"http://host.docker.internal:8087/*"
+"http://host.docker.internal:8086/*"
 ],
 "webOrigins": ["+"]
 }
