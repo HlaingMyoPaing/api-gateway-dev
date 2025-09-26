@@ -63,7 +63,7 @@ services:
       # HTTPS
       # KONG_ADMIN_SSL_CERT: /certs/admin.crt
       # KONG_ADMIN_SSL_CERT_KEY: /certs/admin.key
-      KONG_ADMIN_API_URL: ${KONG_ADMIN_API_URL:-http://host.docker.internal:3001/admin-api/}
+      KONG_ADMIN_API_URL: ${KONG_ADMIN_API_URL:-http://host.docker.internal:3006/admin-api/}
       # Node identity
       KONG_HOSTNAME: ${KONG_HOSTNAME:-host.docker.internal}
       # Proxy listeners
